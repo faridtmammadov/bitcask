@@ -1,4 +1,4 @@
-package bitcask
+package engine
 
 import (
 	"bytes"
@@ -24,9 +24,9 @@ func (h *Header) EncodeHeader(buf *bytes.Buffer) error {
 
 func (h *Header) DecodeHeader(buf []byte) error {
 	err := binary.Read(bytes.NewReader(buf[0:4]), binary.LittleEndian, &h.Checksum)
-	binary.Read(bytes.NewReader(buf[5:9]), binary.LittleEndian, &h.TimeStamp)
-	binary.Read(bytes.NewReader(buf[9:13]), binary.LittleEndian, &h.KeySize)
-	binary.Read(bytes.NewReader(buf[13:17]), binary.LittleEndian, &h.ValueSize)
+	binary.Read(bytes.NewReader(buf[4:8]), binary.LittleEndian, &h.TimeStamp)
+	binary.Read(bytes.NewReader(buf[8:12]), binary.LittleEndian, &h.KeySize)
+	binary.Read(bytes.NewReader(buf[12:16]), binary.LittleEndian, &h.ValueSize)
 	return err
 }
 

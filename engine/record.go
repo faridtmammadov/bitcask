@@ -1,4 +1,4 @@
-package bitcask
+package engine
 
 import (
 	"bytes"
@@ -13,7 +13,8 @@ type Record struct {
 	RecordSize uint32
 }
 
-func NewRecord(header Header, key string, value string) *Record {
+func NewRecord(timestamp uint32, key string, value string) *Record {
+	header := Header{TimeStamp: timestamp, KeySize: uint32(len(key)), ValueSize: uint32(len(value))}
 	record := &Record{
 		Header:     header,
 		Key:        key,
@@ -21,7 +22,7 @@ func NewRecord(header Header, key string, value string) *Record {
 		RecordSize: header.KeySize + header.ValueSize + headerSize,
 	}
 
-	header.Checksum = record.CalculateCheckSum()
+	record.Header.Checksum = calculateChecksum(record)
 
 	return record
 }
@@ -33,15 +34,21 @@ func (r *Record) EncodeKV(buf *bytes.Buffer) error {
 	return err
 }
 
-func (r *Record) DecodeKV(buf []byte) error {
+func DecodeKV(buf []byte) (*Record, error) {
+	r := new(Record)
 	err := r.Header.DecodeHeader(buf[:headerSize])
 	r.Key = string(buf[headerSize : headerSize+r.Header.KeySize])
 	r.Value = string(buf[headerSize+r.Header.KeySize : headerSize+r.Header.KeySize+r.Header.ValueSize])
 	r.RecordSize = headerSize + r.Header.KeySize + r.Header.ValueSize
-	return err
+
+	if err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
-func (r *Record) CalculateCheckSum() uint32 {
+func calculateChecksum(r *Record) uint32 {
 	// encode header
 	headerBuf := new(bytes.Buffer)
 	binary.Write(headerBuf, binary.LittleEndian, &r.Header.TimeStamp)

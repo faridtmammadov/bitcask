@@ -1,8 +1,7 @@
-package bitcask
+package engine
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"log"
 	"os"
@@ -27,24 +26,24 @@ type DiskStore struct {
 	keyDir map[string]KeyEntry
 }
 
-func NewDiskStore(directoryName string) (*DiskStore, error) {
-	if !isFileExists(directoryName) {
-		return nil, errors.New("directory " + directoryName + " doesn't exist")
+func NewDiskStore(directoryPath string) (*DiskStore, error) {
+	if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
+		return nil, err
 	}
 
-	ds := &DiskStore{
-		dir:    directoryName,
+	diskStore := &DiskStore{
+		dir:    directoryPath,
 		keyDir: make(map[string]KeyEntry),
 	}
 
-	err := ds.initKeyDir(directoryName)
+	err := diskStore.initKeyDir(directoryPath)
 
 	if err != nil {
 		log.Fatalf("error while loading the keys from disk: %v", err)
 		return nil, err
 	}
 
-	return ds, nil
+	return diskStore, nil
 }
 
 func (d *DiskStore) Get(key string) (string, error) {
@@ -66,17 +65,16 @@ func (d *DiskStore) Get(key string) (string, error) {
 		return "", ErrReadFailed
 	}
 
-	result := new(Record)
-	err = result.DecodeKV(data)
+	record, err := DecodeKV(data)
 	if err != nil {
 		return "", ErrDecodingFailed
 	}
 
-	if !result.VerifyChecksum(data) {
+	if !record.VerifyChecksum(data) {
 		return "", ErrChecksumMismatch
 	}
 
-	return result.Value, nil
+	return record.Value, nil
 }
 
 func (d *DiskStore) Set(key string, value string) error {
@@ -85,8 +83,8 @@ func (d *DiskStore) Set(key string, value string) error {
 	}
 
 	timestamp := uint32(time.Now().Unix())
-	h := Header{TimeStamp: timestamp, KeySize: uint32(len(key)), ValueSize: uint32(len(value))}
-	r := NewRecord(h, key, value)
+
+	r := NewRecord(timestamp, key, value)
 
 	if err := d.checkMaxFileSizeReached(r.RecordSize); err != nil {
 		return err
