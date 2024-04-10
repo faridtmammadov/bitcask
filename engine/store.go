@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -24,9 +25,10 @@ type DiskStore struct {
 	// of the byte offset in the file where the value exists. key_dir map acts as in-memory
 	// index to fetch the values quickly from the disk
 	keyDir map[string]KeyEntry
+	mux    *sync.RWMutex
 }
 
-func Start(directoryPath string) (*DiskStore, error) {
+func Open(directoryPath string) (*DiskStore, error) {
 	if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
 		return nil, err
 	}
@@ -34,6 +36,7 @@ func Start(directoryPath string) (*DiskStore, error) {
 	diskStore := &DiskStore{
 		dir:    directoryPath,
 		keyDir: make(map[string]KeyEntry),
+		mux:    &sync.RWMutex{},
 	}
 
 	err := diskStore.initKeyDir(directoryPath)
@@ -47,7 +50,8 @@ func Start(directoryPath string) (*DiskStore, error) {
 }
 
 func (d *DiskStore) Get(key string) (string, error) {
-
+	d.mux.RLock()
+	defer d.mux.RUnlock()
 	keyEntry, ok := d.keyDir[key]
 	if !ok {
 		return "", ErrKeyNotFound
@@ -71,6 +75,8 @@ func (d *DiskStore) Get(key string) (string, error) {
 }
 
 func (d *DiskStore) Set(key string, value string) error {
+	d.mux.Lock()
+	defer d.mux.Unlock()
 	if err := validateKV(key, value); err != nil {
 		return err
 	}
