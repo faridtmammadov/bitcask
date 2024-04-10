@@ -14,6 +14,8 @@ import (
 // while writing to file if max file size reached, new file will be created
 var MaxFileSize int64 = 1 << 30
 
+const TOMBSTONE = "<<bitcask||tombstone>>"
+
 type DiskStore struct {
 	// directory name that contains all data files
 	dir string
@@ -74,7 +76,7 @@ func (d *DiskStore) Get(key string) (string, error) {
 	return value, nil
 }
 
-func (d *DiskStore) Set(key string, value string) error {
+func (d *DiskStore) Put(key string, value string) error {
 	d.mux.Lock()
 	defer d.mux.Unlock()
 	if err := validateKV(key, value); err != nil {
@@ -99,6 +101,38 @@ func (d *DiskStore) Set(key string, value string) error {
 	d.keyDir[key] = NewKeyEntry(timestamp, d.dataFile, uint32(headerSize+r.Header.KeySize), r.Header.ValueSize)
 	// update last write position, so that next record can be written from this point
 	d.writePosition += int(r.RecordSize)
+
+	return nil
+}
+
+func (d *DiskStore) Delete(key string) error {
+	d.mux.Lock()
+	defer d.mux.Unlock()
+
+	_, ok := d.keyDir[key]
+
+	if !ok {
+		return nil
+	}
+
+	timestamp := uint32(time.Now().Unix())
+	record := NewRecord(timestamp, key, TOMBSTONE)
+
+	if err := d.checkMaxFileSizeReached(record.RecordSize); err != nil {
+		return err
+	}
+
+	buf := new(bytes.Buffer)
+	record.EncodeKV(buf)
+
+	err := record.EncodeKV(buf)
+	if err != nil {
+		return ErrEncodingFailed
+	}
+	d.writeData(buf.Bytes())
+
+	delete(d.keyDir, key)
+	d.writePosition += int(record.RecordSize)
 
 	return nil
 }
@@ -238,7 +272,12 @@ func initKeyDirInternal(keyDir map[string]KeyEntry, filepath string) error {
 			return ErrChecksumMismatch
 		}
 
-		keyDir[string(key)] = NewKeyEntry(h.TimeStamp, file, uint32(writePosition)+headerSize+h.KeySize, h.ValueSize)
+		if record.Value == TOMBSTONE {
+			delete(keyDir, record.Key)
+		} else {
+			keyDir[record.Key] = NewKeyEntry(h.TimeStamp, file, uint32(writePosition)+headerSize+h.KeySize, h.ValueSize)
+		}
+
 		writePosition += int(record.RecordSize)
 	}
 
