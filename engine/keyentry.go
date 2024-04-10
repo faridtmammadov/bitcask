@@ -5,12 +5,12 @@ import (
 )
 
 type KeyEntry struct {
-	timestamp uint32
-	file      *os.File
-	position  uint32
-	totalSize uint32
+	timestamp     uint32
+	file          *os.File
+	valuePosition uint32
+	valueSize     uint32
 }
 
-func NewKeyEntry(timestamp uint32, file *os.File, position uint32, totalSize uint32) KeyEntry {
-	return KeyEntry{timestamp, file, position, totalSize}
+func NewKeyEntry(timestamp uint32, file *os.File, valuePosition uint32, valueSize uint32) KeyEntry {
+	return KeyEntry{timestamp, file, valuePosition, valueSize}
 }

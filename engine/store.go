@@ -26,7 +26,7 @@ type DiskStore struct {
 	keyDir map[string]KeyEntry
 }
 
-func NewDiskStore(directoryPath string) (*DiskStore, error) {
+func Start(directoryPath string) (*DiskStore, error) {
 	if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
 		return nil, err
 	}
@@ -54,27 +54,20 @@ func (d *DiskStore) Get(key string) (string, error) {
 	}
 
 	// move the current pointer to the right offset
-	_, err := keyEntry.file.Seek(int64(keyEntry.position), 0)
+	_, err := keyEntry.file.Seek(int64(keyEntry.valuePosition), 0)
 	if err != nil {
 		return "", ErrSeekFailed
 	}
 
-	data := make([]byte, keyEntry.totalSize)
+	data := make([]byte, keyEntry.valueSize)
 	_, err = io.ReadFull(keyEntry.file, data)
 	if err != nil {
 		return "", ErrReadFailed
 	}
 
-	record, err := DecodeKV(data)
-	if err != nil {
-		return "", ErrDecodingFailed
-	}
+	value := string(data)
 
-	if !record.VerifyChecksum(data) {
-		return "", ErrChecksumMismatch
-	}
-
-	return record.Value, nil
+	return value, nil
 }
 
 func (d *DiskStore) Set(key string, value string) error {
@@ -97,7 +90,7 @@ func (d *DiskStore) Set(key string, value string) error {
 	}
 	d.writeData(buf.Bytes())
 
-	d.keyDir[key] = NewKeyEntry(timestamp, d.dataFile, uint32(d.writePosition), r.RecordSize)
+	d.keyDir[key] = NewKeyEntry(timestamp, d.dataFile, uint32(headerSize+r.Header.KeySize), r.Header.ValueSize)
 	// update last write position, so that next record can be written from this point
 	d.writePosition += int(r.RecordSize)
 
@@ -168,13 +161,15 @@ func (d *DiskStore) initKeyDir(directoryName string) error {
 		}
 	}
 
-	fileName := createFilenameId("") + ".bitcask.data"
+	filenameId := createFilenameId("")
+	filename := filenameId + ".bitcask.data"
 
 	if len(dirEntries) > 0 {
-		fileName = createFilenameId(dirEntries[len(dirEntries)-1].Name()) + ".bitcask.data"
+		filenameId = createFilenameId(dirEntries[len(dirEntries)-1].Name())
+		filename = filenameId + ".bitcask.data"
 	}
 
-	file, err := os.Create(filepath.Join(d.dir, fileName))
+	file, err := os.Create(filepath.Join(d.dir, filename))
 	if err != nil {
 		return err
 	}
@@ -184,14 +179,14 @@ func (d *DiskStore) initKeyDir(directoryName string) error {
 	return nil
 }
 
-func initKeyDirInternal(keyDir map[string]KeyEntry, existingFile string) error {
+func initKeyDirInternal(keyDir map[string]KeyEntry, filepath string) error {
 	// we will initialise the keyDir by reading the contents of the file, record by
 	// record. As we read each record, we will also update our keyDir with the
 	// corresponding KeyEntry
 	//
 	// NOTE: this method is a blocking one, if the DB size is yuge then it will take
 	// a lot of time to startup
-	file, _ := os.Open(existingFile)
+	file, _ := os.Open(filepath)
 	writePosition := 0
 
 	for {
@@ -223,10 +218,24 @@ func initKeyDirInternal(keyDir map[string]KeyEntry, existingFile string) error {
 			return err
 		}
 
-		totalSize := headerSize + h.KeySize + h.ValueSize
-		keyDir[string(key)] = NewKeyEntry(h.TimeStamp, file, uint32(writePosition), totalSize)
-		writePosition += int(totalSize)
+		data := append(header, key...)
+		data = append(data, value...)
+
+		record, err := DecodeKV(data)
+
+		if err != nil {
+			return err
+		}
+
+		checksumCorrect := record.VerifyChecksum(data)
+		if !checksumCorrect {
+			return ErrChecksumMismatch
+		}
+
+		keyDir[string(key)] = NewKeyEntry(h.TimeStamp, file, uint32(writePosition)+headerSize+h.KeySize, h.ValueSize)
+		writePosition += int(record.RecordSize)
 	}
+
 	return nil
 }
 
